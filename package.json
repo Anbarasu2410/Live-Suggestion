@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --experimental-https --webpack",
+    "dev:local": "next dev --webpack",
     "dev:turbo": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
@@ -18,7 +19,7 @@
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "tailwind-merge": "^2.3.0",
-    "lucide-react": "^0.378.0",
+    "lucide-react": "^0.468.0",
     "@radix-ui/react-scroll-area": "^1.0.5",
     "@radix-ui/react-separator": "^1.0.3",
     "@radix-ui/react-slot": "^1.0.2",
