@@ -12,7 +12,9 @@ export async function POST(request: NextRequest) {
   if (!apiKey) return NextResponse.json({ error: "No API key" }, { status: 400 });
 
   const transcriptBlock = fullTranscript ? `\n\nMeeting transcript:\n${fullTranscript}` : "";
-  let systemContent, userContent, history = [];
+  let systemContent: string;
+  let userContent: string;
+  let history: Array<{ role: string; content: string }> = [];
 
   if (expansionMode && suggestion) {
     systemContent = (expansionPrompt || "You are an AI meeting assistant. Expand on the suggestion using the meeting transcript. Use bullet points and be detailed.") + transcriptBlock;
@@ -25,7 +27,7 @@ export async function POST(request: NextRequest) {
 
   const messages = [{ role: "system", content: systemContent }, ...history, { role: "user", content: userContent }];
 
-  let groqRes;
+  let groqRes: Response;
   try {
     groqRes = await fetch(GROQ_URL, {
       method: "POST",
@@ -42,10 +44,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Groq error ${groqRes.status}: ${errText}` }, { status: 500 });
   }
 
+  if (!groqRes.body) {
+    return NextResponse.json({ error: "No response body from Groq" }, { status: 500 });
+  }
+
   const encoder = new TextEncoder();
+  const body2 = groqRes.body;
   const readable = new ReadableStream({
     async start(controller) {
-      const reader = groqRes.body.getReader();
+      const reader = body2.getReader();
       const decoder = new TextDecoder();
       let buf = "";
       try {
@@ -62,7 +69,9 @@ export async function POST(request: NextRequest) {
               try {
                 const delta = JSON.parse(t.slice(6))?.choices?.[0]?.delta?.content;
                 if (delta) controller.enqueue(encoder.encode(delta));
-              } catch {}
+              } catch {
+                // skip
+              }
             }
           }
         }
