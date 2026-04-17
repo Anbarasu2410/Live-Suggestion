@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Meeting Assistant
 
-## Getting Started
+A real-time AI meeting assistant that transcribes speech, generates intelligent suggestions, and provides a context-aware chat interface — all powered by Groq.
 
-First, run the development server:
+## Setup
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Adding Your Groq API Key
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Go to [console.groq.com](https://console.groq.com) and create an API key
+2. Click **Settings** in the top-right of the app
+3. Paste your key in the "Groq API Key" field and click **Save Settings**
 
-## Learn More
+The key is stored in `localStorage` only — never sent to any server other than Groq directly.
 
-To learn more about Next.js, take a look at the following resources:
+## Architecture
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+app/
+  page.tsx              # Main 3-column layout
+  settings/page.tsx     # Settings UI
+  api/
+    transcribe/         # Whisper Large V3 via Groq
+    suggest/            # Generates 3 suggestions from recent transcript
+    chat/               # Streaming chat + suggestion expansion
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+components/
+  MicRecorder.tsx       # Web Audio API + MediaRecorder, chunks every 30s
+  TranscriptPanel.tsx   # Left panel — live transcript with timestamps
+  SuggestionsPanel.tsx  # Middle panel — auto-refreshing suggestion cards
+  SuggestionCard.tsx    # Individual card with expand + send-to-chat
+  ChatPanel.tsx         # Right panel — streaming chat interface
+  ExportButton.tsx      # JSON session export
 
-## Deploy on Vercel
+lib/
+  groq.ts               # Fetch wrapper for Groq API (chat + transcription)
+  prompts.ts            # All prompt templates + message builders
+  transcript.ts         # Token estimation, context windowing, hashing
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+store/
+  useAppStore.ts        # Zustand store (persists settings to localStorage)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+types/
+  index.ts              # Shared TypeScript types
+```
+
+## Prompt Strategy
+
+**Suggestions** use only the last ~1500 tokens of transcript to stay focused on recent context. The prompt enforces exactly 3 suggestions with diverse types (question, talking_point, answer, fact_check, clarification). A quality check retries once if the output is malformed.
+
+**Expansion** uses the full transcript (up to ~6000 tokens) to give detailed, structured responses with bullets and actionable content.
+
+**Chat** uses the full transcript as system context so every answer is grounded in what was actually said in the meeting.
+
+## Key Tradeoffs
+
+- **Client-side API key**: Stored in localStorage for simplicity. For production, use server-side sessions or a backend proxy.
+- **30s audio chunks**: Balances transcription latency vs. cost. Shorter chunks = more API calls; longer = more delay.
+- **No WebSocket**: Uses polling + interval-based suggestions instead of a persistent connection. Simpler to deploy on Vercel.
+- **Transcript hashing**: Prevents duplicate suggestion calls when transcript hasn't changed.
+- **Streaming chat**: Uses ReadableStream passthrough from Groq → client for low-latency responses.
+
+## Deployment (Vercel)
+
+```bash
+vercel deploy
+```
+
+No environment variables required — the API key is managed client-side via Settings.
+
+## Models Used
+
+| Task | Model |
+|------|-------|
+| Transcription | `whisper-large-v3` |
+| Suggestions + Chat | `meta-llama/llama-4-maverick-17b-128e-instruct` |
