@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { groqTranscribe } from "@/lib/groq";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -7,20 +6,43 @@ export const maxDuration = 30;
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
-    const audio = formData.get("audio") as Blob | null;
+    const file = formData.get("file") as Blob | null;
     const apiKey = formData.get("apiKey") as string | null;
-    const mimeType = (formData.get("mimeType") as string) || "audio/webm";
 
-    if (!audio) {
-      return NextResponse.json({ error: "No audio provided" }, { status: 400 });
+    if (!file) {
+      return NextResponse.json({ error: "No audio file provided" }, { status: 400 });
     }
     if (!apiKey) {
       return NextResponse.json({ error: "No API key provided" }, { status: 400 });
     }
 
-    const text = await groqTranscribe(apiKey, audio, mimeType);
+    // Determine extension from file name if available
+    const fileName = (file as File).name || "recording.webm";
+    const ext = fileName.endsWith(".ogg") ? "ogg" : "webm";
 
-    return NextResponse.json({ text });
+    const groqForm = new FormData();
+    groqForm.append(
+      "file",
+      new Blob([await file.arrayBuffer()], { type: `audio/${ext}` }),
+      `recording.${ext}`
+    );
+    groqForm.append("model", "whisper-large-v3");
+    groqForm.append("response_format", "json");
+    groqForm.append("language", "en");
+
+    const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: groqForm,
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Groq transcription error ${res.status}: ${err}`);
+    }
+
+    const data = await res.json();
+    return NextResponse.json({ text: data.text || "" });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Transcription failed";
     console.error("[transcribe]", message);

@@ -82,7 +82,10 @@ export default function ChatPanel({ pendingSuggestion, onPendingConsumed }: Prop
           }),
         });
 
-        if (!res.ok) throw new Error("Chat request failed");
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Chat request failed (${res.status}): ${errText}`);
+        }
 
         const reader = res.body?.getReader();
         const decoder = new TextDecoder();
@@ -98,9 +101,8 @@ export default function ChatPanel({ pendingSuggestion, onPendingConsumed }: Prop
         }
       } catch (err) {
         console.error("[ChatPanel] error:", err);
-        updateLastAssistantMessage(
-          "Sorry, something went wrong. Please try again."
-        );
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        updateLastAssistantMessage(`❌ ${msg}`);
       } finally {
         setChatLoading(false);
       }

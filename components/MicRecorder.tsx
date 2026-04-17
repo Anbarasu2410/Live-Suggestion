@@ -3,7 +3,7 @@
 import { useRef, useCallback, useEffect } from "react";
 import { useAppStore } from "@/store/useAppStore";
 import { generateId } from "@/lib/transcript";
-import { Mic, MicOff, Loader2 } from "lucide-react";
+import { Mic, MicOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const CHUNK_INTERVAL_MS = 30000; // 30 seconds
@@ -12,24 +12,29 @@ export default function MicRecorder() {
   const { isRecording, setIsRecording, addTranscriptEntry, settings } =
     useAppStore();
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const mimeTypeRef = useRef<string>("audio/webm");
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isProcessingRef = useRef(false);
 
-  const processChunk = useCallback(
+  // We keep a rolling MediaRecorder — stop/restart every 30s to get a complete blob
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const mimeTypeRef = useRef<string>("audio/webm");
+
+  const transcribeBlob = useCallback(
     async (blob: Blob) => {
-      if (!settings.groqApiKey || blob.size < 1000) return;
+      if (!settings.groqApiKey || blob.size < 3000) return;
       if (isProcessingRef.current) return;
       isProcessingRef.current = true;
 
       try {
+        const ext = mimeTypeRef.current.includes("ogg") ? "ogg" : "webm";
         const formData = new FormData();
-        formData.append("audio", blob);
+        // Filename with extension is critical for Groq Whisper
+        formData.append("file", blob, `recording.${ext}`);
+        formData.append("model", "whisper-large-v3");
+        formData.append("response_format", "json");
+        formData.append("language", "en");
         formData.append("apiKey", settings.groqApiKey);
-        formData.append("mimeType", mimeTypeRef.current);
 
         const res = await fetch("/api/transcribe", {
           method: "POST",
@@ -55,12 +60,32 @@ export default function MicRecorder() {
     [settings.groqApiKey, addTranscriptEntry]
   );
 
-  const flushChunks = useCallback(() => {
-    if (chunksRef.current.length === 0) return;
-    const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
-    chunksRef.current = [];
-    processChunk(blob);
-  }, [processChunk]);
+  const startSegment = useCallback(() => {
+    if (!streamRef.current) return;
+
+    const chunks: Blob[] = [];
+    const recorder = new MediaRecorder(streamRef.current, {
+      mimeType: mimeTypeRef.current,
+    });
+    recorderRef.current = recorder;
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: mimeTypeRef.current });
+      transcribeBlob(blob);
+    };
+
+    recorder.start();
+  }, [transcribeBlob]);
+
+  const stopSegment = useCallback(() => {
+    if (recorderRef.current?.state === "recording") {
+      recorderRef.current.stop();
+    }
+  }, []);
 
   const startRecording = useCallback(async () => {
     if (!settings.groqApiKey) {
@@ -69,59 +94,49 @@ export default function MicRecorder() {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 16000,
+        },
+      });
       streamRef.current = stream;
 
+      // Pick best supported mime type
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
         : MediaRecorder.isTypeSupported("audio/webm")
         ? "audio/webm"
-        : "audio/ogg";
+        : "audio/ogg;codecs=opus";
 
       mimeTypeRef.current = mimeType;
 
-      const recorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorderRef.current = recorder;
-      chunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-
-      recorder.start(1000); // collect data every 1s
       setIsRecording(true);
+      startSegment();
 
-      // Flush every 30s
-      intervalRef.current = setInterval(flushChunks, CHUNK_INTERVAL_MS);
+      // Every 30s: stop current segment (triggers transcription) then start new one
+      intervalRef.current = setInterval(() => {
+        stopSegment();
+        setTimeout(startSegment, 300);
+      }, CHUNK_INTERVAL_MS);
     } catch (err) {
       console.error("[MicRecorder] start error:", err);
-      alert(
-        "Microphone access denied. Please allow microphone permissions and try again."
-      );
+      alert("Microphone access denied. Please allow microphone permissions.");
     }
-  }, [settings.groqApiKey, setIsRecording, flushChunks]);
+  }, [settings.groqApiKey, setIsRecording, startSegment, stopSegment]);
 
   const stopRecording = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
-
-    if (mediaRecorderRef.current?.state !== "inactive") {
-      mediaRecorderRef.current?.stop();
-    }
-
-    // Flush remaining audio
-    setTimeout(() => {
-      flushChunks();
-    }, 500);
-
+    stopSegment();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     setIsRecording(false);
-  }, [setIsRecording, flushChunks]);
+  }, [setIsRecording, stopSegment]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);

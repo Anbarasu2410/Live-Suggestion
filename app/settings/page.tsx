@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAppStore } from "@/store/useAppStore";
 import {
   DEFAULT_SUGGESTION_PROMPT,
@@ -14,8 +14,13 @@ export default function SettingsPage() {
   const { settings, updateSettings } = useAppStore();
   const [showKey, setShowKey] = useState(false);
   const [saved, setSaved] = useState(false);
-
   const [form, setForm] = useState({ ...settings });
+
+  // Sync form when persisted settings load from localStorage
+  useEffect(() => {
+    setForm({ ...settings });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.groqApiKey]);
 
   const handleSave = () => {
     updateSettings(form);

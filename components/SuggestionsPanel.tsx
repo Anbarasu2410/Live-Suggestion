@@ -91,6 +91,17 @@ export default function SuggestionsPanel({
     };
   }, [isRecording, fetchSuggestions]);
 
+  // Also trigger once when recording stops if transcript has new content
+  useEffect(() => {
+    if (!isRecording && transcript.length > 0) {
+      const hash = hashTranscript(transcript);
+      if (hash !== lastTranscriptHash) {
+        fetchSuggestions(false);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRecording]);
+
   const allSuggestions = suggestionBatches.flatMap((b) => b.suggestions);
 
   return (

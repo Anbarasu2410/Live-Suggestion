@@ -3,20 +3,11 @@ export const DEFAULT_SUGGESTION_PROMPT = `You are an AI meeting assistant. Analy
 Rules:
 - Each suggestion must be directly relevant to what was just discussed
 - Never generate generic or vague suggestions
-- Use diverse types: question, talking_point, answer, fact_check, clarification
-- Each suggestion must provide standalone value even without expansion
+- Use diverse types from: question, talking_point, answer, fact_check, clarification
 - Be specific, actionable, and insightful
 
-Return ONLY valid JSON in this exact format:
-{
-  "suggestions": [
-    {
-      "type": "question|talking_point|answer|fact_check|clarification",
-      "title": "Short actionable title (max 10 words)",
-      "preview": "One sentence that delivers immediate value (max 25 words)"
-    }
-  ]
-}`;
+You MUST respond with ONLY valid JSON, no markdown, no explanation:
+{"suggestions":[{"type":"question","title":"Short title here","preview":"One sentence preview here"},{"type":"talking_point","title":"Short title here","preview":"One sentence preview here"},{"type":"answer","title":"Short title here","preview":"One sentence preview here"}]}`;
 
 export const DEFAULT_EXPANSION_PROMPT = `You are an AI meeting assistant. A user wants to expand on a suggestion from the meeting.
 
@@ -48,7 +39,7 @@ export function buildSuggestionMessages(
     },
     {
       role: "user" as const,
-      content: `Recent meeting transcript (last ~2 minutes):\n\n${recentTranscript}\n\nGenerate exactly 3 suggestions based on this content.`,
+      content: `Recent meeting transcript:\n\n${recentTranscript}\n\nRespond with ONLY the JSON object containing exactly 3 suggestions.`,
     },
   ];
 }

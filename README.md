@@ -79,4 +79,4 @@ No environment variables required — the API key is managed client-side via Set
 | Task | Model |
 |------|-------|
 | Transcription | `whisper-large-v3` |
-| Suggestions + Chat | `meta-llama/llama-4-maverick-17b-128e-instruct` |
+| Suggestions + Chat | `llama3-70b-8192` |

@@ -1,6 +1,6 @@
 const GROQ_API_BASE = "https://api.groq.com/openai/v1";
 const TRANSCRIPTION_MODEL = "whisper-large-v3";
-const CHAT_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct";
+const CHAT_MODEL = "llama-3.3-70b-versatile";
 
 export async function groqChat(
   apiKey: string,

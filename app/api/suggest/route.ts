@@ -1,27 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { groqChat } from "@/lib/groq";
-import { buildSuggestionMessages } from "@/lib/prompts";
-import { Suggestion, SuggestionBatch } from "@/types";
 import { generateId } from "@/lib/transcript";
+import { Suggestion, SuggestionBatch } from "@/types";
 
-export const runtime = "nodejs";
-export const maxDuration = 30;
-
-function isValidSuggestions(data: unknown): boolean {
-  if (!data || typeof data !== "object") return false;
-  const d = data as Record<string, unknown>;
-  if (!Array.isArray(d.suggestions) || d.suggestions.length !== 3) return false;
-  return d.suggestions.every(
-    (s: unknown) =>
-      s &&
-      typeof s === "object" &&
-      typeof (s as Record<string, unknown>).type === "string" &&
-      typeof (s as Record<string, unknown>).title === "string" &&
-      typeof (s as Record<string, unknown>).preview === "string" &&
-      (s as Record<string, unknown>).title !== "" &&
-      (s as Record<string, unknown>).preview !== ""
-  );
-}
+const GROQ_API_BASE = "https://api.groq.com/openai/v1";
+const CHAT_MODEL = "llama-3.3-70b-versatile";
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,68 +11,91 @@ export async function POST(req: NextRequest) {
     const { recentTranscript, transcriptHash, apiKey, customPrompt } = body;
 
     if (!apiKey) {
-      return NextResponse.json({ error: "No API key provided" }, { status: 400 });
+      return NextResponse.json({ error: "No API key" }, { status: 400 });
     }
     if (!recentTranscript?.trim()) {
-      return NextResponse.json({ error: "No transcript content" }, { status: 400 });
+      return NextResponse.json({ error: "No transcript" }, { status: 400 });
     }
 
-    const messages = buildSuggestionMessages(recentTranscript, customPrompt);
+    const systemPrompt =
+      customPrompt ||
+      `You are an AI meeting assistant. Generate exactly 3 suggestions based on the meeting transcript.
+Respond with ONLY a JSON object, no markdown, no explanation, no code blocks.
+Use this exact format: {"suggestions":[{"type":"question","title":"title here","preview":"preview here"},{"type":"talking_point","title":"title here","preview":"preview here"},{"type":"answer","title":"title here","preview":"preview here"}]}
+Types allowed: question, talking_point, answer, fact_check, clarification`;
 
+    const groqRes = await fetch(`${GROQ_API_BASE}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: CHAT_MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          {
+            role: "user",
+            content: `Meeting transcript:\n\n${recentTranscript}\n\nReturn ONLY the JSON with 3 suggestions.`,
+          },
+        ],
+        stream: false,
+        temperature: 0.7,
+        max_tokens: 600,
+      }),
+    });
+
+    if (!groqRes.ok) {
+      const err = await groqRes.text();
+      console.error("[suggest] Groq error:", err);
+      return NextResponse.json({ error: `Groq error: ${err}` }, { status: 500 });
+    }
+
+    const groqData = await groqRes.json();
+    const content = groqData.choices?.[0]?.message?.content || "";
+    console.log("[suggest] raw:", content);
+
+    // Parse JSON — strip markdown code blocks if present
     let parsed: unknown = null;
-    let attempts = 0;
-
-    while (attempts < 2) {
-      attempts++;
-      try {
-        const res = await groqChat(apiKey, messages, {
-          temperature: 0.7,
-          maxTokens: 512,
-        });
-        const data = await res.json();
-        const content = data.choices?.[0]?.message?.content || "";
-
-        // Extract JSON from response
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          parsed = JSON.parse(jsonMatch[0]);
-        }
-
-        if (isValidSuggestions(parsed)) break;
-        parsed = null;
-      } catch {
-        if (attempts >= 2) throw new Error("Failed to generate valid suggestions");
-      }
+    try {
+      const clean = content
+        .replace(/```json\s*/gi, "")
+        .replace(/```\s*/g, "")
+        .trim();
+      const match = clean.match(/\{[\s\S]*\}/);
+      if (match) parsed = JSON.parse(match[0]);
+    } catch (e) {
+      console.error("[suggest] parse error:", e, "content:", content);
     }
 
-    if (!parsed || !isValidSuggestions(parsed)) {
-      return NextResponse.json(
-        { error: "Could not generate quality suggestions" },
-        { status: 422 }
-      );
+    const p = parsed as { suggestions?: Array<{ type: string; title: string; preview: string }> };
+    if (!p?.suggestions || !Array.isArray(p.suggestions) || p.suggestions.length === 0) {
+      console.error("[suggest] invalid structure:", parsed);
+      return NextResponse.json({ error: "Invalid suggestion structure" }, { status: 422 });
     }
 
+    // Take up to 3, pad if fewer
+    const raw = p.suggestions.slice(0, 3);
     const batchId = generateId();
+
     const batch: SuggestionBatch = {
       id: batchId,
       timestamp: Date.now(),
       transcriptHash,
-      suggestions: (parsed as { suggestions: Array<{ type: string; title: string; preview: string }> }).suggestions.map(
-        (s) => ({
-          id: generateId(),
-          type: s.type as Suggestion["type"],
-          title: s.title,
-          preview: s.preview,
-          timestamp: Date.now(),
-          batchId,
-        })
-      ),
+      suggestions: raw.map((s) => ({
+        id: generateId(),
+        type: (s.type || "question") as Suggestion["type"],
+        title: s.title || "Suggestion",
+        preview: s.preview || "",
+        timestamp: Date.now(),
+        batchId,
+      })),
     };
 
     return NextResponse.json({ batch });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Suggestion generation failed";
-    console.error("[suggest]", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    const msg = err instanceof Error ? err.message : "Failed";
+    console.error("[suggest] error:", msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

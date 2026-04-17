@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import TranscriptPanel from "@/components/TranscriptPanel";
 import SuggestionsPanel from "@/components/SuggestionsPanel";
 import ChatPanel from "@/components/ChatPanel";
@@ -16,6 +16,9 @@ export default function Home() {
     suggestion: Suggestion;
     expanded: string;
   } | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
 
   const handleSendToChat = useCallback(
     (suggestion: Suggestion, expanded: string) => {
@@ -28,6 +31,8 @@ export default function Home() {
     setPendingSuggestion(null);
   }, []);
 
+  const hasApiKey = mounted && !!settings.groqApiKey;
+
   return (
     <div className="flex flex-col h-screen bg-zinc-950 text-zinc-100">
       {/* Top bar */}
@@ -37,7 +42,7 @@ export default function Home() {
             <span className="text-xs font-bold text-white">AI</span>
           </div>
           <span className="font-semibold text-sm">Meeting Assistant</span>
-          {!settings.groqApiKey && (
+          {!hasApiKey && (
             <Link
               href="/settings"
               className="text-xs text-yellow-400 hover:text-yellow-300 underline"
